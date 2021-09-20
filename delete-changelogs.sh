@@ -1,5 +1,12 @@
 #!/bin/bash
 
+source_vol="primevol"
+dest_vol="slavevol"
+dest_node="slave1"
+brick_path="/gluster/brick1/brick1"
+brick_path_dashes=$(echo $brick_path | sed 's#/##' | sed 's#/#-#g')
+
+
 while [[ $# -gt 0 ]]; do
 	case $1 in 
 		-d|--dry-run)
@@ -13,7 +20,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # We are using the processed files located at:
-#/var/lib/misc/gluster/gsyncd/primevol_slave1_slavevol/gluster-brick1-brick1/.processed
+#/var/lib/misc/gluster/gsyncd/${source_vol}_${dest_node}_${dest_vol}/${brick_path_dashes}/.processed
 
 # We are using tmpfs as processing is faster
 mkdir /var/tmp/gluster_cleanup
@@ -36,14 +43,14 @@ trap cleanup EXIT SIGINT SIGKILL SIGQUIT SIGTERM
 
 # Get all changelogs locally and store them into $changelog_file
 # Changelogs are different per host
-ionice -c 2 -n 7 find /gluster/brick1/brick1/.glusterfs/changelogs/$(date '+%Y')/  -type f -name "CHANGELOG.*" -print > ${changelog_file}
+ionice -c 2 -n 7 find ${brick_path}/.glusterfs/changelogs/$(date '+%Y')/  -type f -name "CHANGELOG.*" -print > ${changelog_file}
 
 #Obtain all processed changelogs
-PROCESSED_LOCALLY=$(ionice -c 2 -n 7 find /var/lib/misc/gluster/gsyncd/primevol_slave1_slavevol/gluster-brick1-brick1/.processed/ -type f -name "archive*.tar" |  wc -l)
+PROCESSED_LOCALLY=$(ionice -c 2 -n 7 find /var/lib/misc/gluster/gsyncd/${source_vol}_${dest_node}_${dest_vol}/${brick_path_dashes}/.processed/ -type f -name "archive*.tar" |  wc -l)
 
 if [ "$PROCESSED_LOCALLY" -gt 0 ]; then
 
-	tar -tvf /var/lib/misc/gluster/gsyncd/primevol_slave1_slavevol/gluster-brick1-brick1/.processed/archive_*.tar | awk '{print $6}' | head -n -5 >> ${processed_changelogs}
+	tar -tvf /var/lib/misc/gluster/gsyncd/${source_vol}_${dest_node}_${dest_vol}/${brick_path_dashes}/.processed/archive_*.tar | awk '{print $6}' | head -n -5 >> ${processed_changelogs}
 
 else
 	echo "No changelogs were processed locally!" >&2
