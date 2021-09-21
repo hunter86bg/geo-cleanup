@@ -1,26 +1,77 @@
 #!/bin/bash
 
-source_vol="primevol"
-dest_vol="slavevol"
-dest_node="slave1"
-brick_path="/gluster/brick1/brick1"
-brick_path_dashes=$(/usr/bin/env echo $brick_path | /usr/bin/env sed 's#/##' | /usr/bin/env sed 's#/#-#g')
+master_vol=""
+sec_vol=""
+dest_node=""
+brick_path=""
+DRYRUN=""
 
+function cleanup {
+	/usr/bin/env rm -f $changelog_file $delete_list $processed_changelogs
+	/usr/bin/env umount /var/tmp/gluster_cleanup
+	/usr/bin/env rmdir /var/tmp/gluster_cleanup
+}
 
+function validate {
+if [ -z "$brick_path" ] || [ -z "$dest_node" ] || \
+	[ -z "$master_vol" ] || [ -z "$sec_vol" ]
+	
+	then
+		echo "One or more parameters are missing.Run $0 --help for details" >&2
+		exit 2
+fi
+}
+
+# Parse all parameters for later usage
 while [[ $# -gt 0 ]]; do
 	case $1 in 
-		-d|--dry-run)
-	                DRYRUN="/bin/echo"
+		-b|--brick_path)
+			brick_path="$2"
+			shift # past argument
+			shift # past value
+			;;
+		-d|--destination_node)
+			dest_node="$2"
+			shift # past argument
+			shift # past value
+			;;
+		-m|--master_volume)
+			master_vol="$2"
+			shift # past argument
+			shift # past value
+			;;
+		-n|--dry-run)
+	                DRYRUN="/usr/bin/env echo"
+			shift
+			shift
 	                ;;
+		-s|--secondary_volume)
+			sec_vol="$2"
+			shift # past argument
+			shift # past value
+			;;
 		*)
-			echo "You can use -d or --dry-run to test the script without deleting any changelogs!"
+			echo "USAGE:"
+			echo "-b|--brick_path         - Path to the locally mounted brick"
+			echo "-d|--destination_node   - The name of the node that was used for establishing the geo-rep on the secondary site"
+			echo "-m|--master_volume      - The name of the volume on the primary side (source)"
+			echo "-s|--secondary_volume   - The name of the secondary volume (target side)"
+			echo "-n|--dry-run            - Dry run mode makes all steps except the deletion"
+	
 			exit 0
 			;;
 	esac
 done
 
+# Assign the var after brick_path var was assigned
+brick_path_dashes=$(/usr/bin/env echo $brick_path | /usr/bin/env sed 's#/##' | /usr/bin/env sed 's#/#-#g')
+
+# Validate that all  parameters have a value
+validate 
+
+
 # We are using the processed files located at:
-#/var/lib/misc/gluster/gsyncd/${source_vol}_${dest_node}_${dest_vol}/${brick_path_dashes}/.processed
+#/var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed
 
 # We are using tmpfs as processing is faster
 /usr/bin/env mkdir /var/tmp/gluster_cleanup
@@ -32,11 +83,6 @@ changelog_file=$(mktemp /var/tmp/gluster_cleanup/changeloglist.XXXXXX)
 delete_list=$(mktemp /var/tmp/gluster_cleanup/todelete.XXXXXX)
 processed_changelogs=$(mktemp /var/tmp/gluster_cleanup/processed.XXXXXX)
 
-function cleanup {
-	/usr/bin/env rm -f $changelog_file $delete_list $processed_changelogs
-	/usr/bin/env umount /var/tmp/gluster_cleanup
-	/usr/bin/env rmdir /var/tmp/gluster_cleanup
-}
 
 # Actual code that captures exit/Ctrl+C,etc
 trap cleanup EXIT SIGINT SIGKILL SIGQUIT SIGTERM
@@ -46,11 +92,11 @@ trap cleanup EXIT SIGINT SIGKILL SIGQUIT SIGTERM
 /usr/bin/env ionice -c 2 -n 7 /usr/bin/env find ${brick_path}/.glusterfs/changelogs/$(date '+%Y')/  -type f -name "CHANGELOG.*" -print > ${changelog_file}
 
 #Obtain all processed changelogs
-PROCESSED_LOCALLY=$(/usr/bin/env ionice -c 2 -n 7 /usr/bin/env find /var/lib/misc/gluster/gsyncd/${source_vol}_${dest_node}_${dest_vol}/${brick_path_dashes}/.processed/ -type f -name "archive*.tar" |  wc -l)
+PROCESSED_LOCALLY=$(/usr/bin/env ionice -c 2 -n 7 /usr/bin/env find /var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed/ -type f -name "archive*.tar" |  wc -l)
 
 if [ "$PROCESSED_LOCALLY" -gt 0 ]; then
 
-	/usr/bin/env tar -tvf /var/lib/misc/gluster/gsyncd/${source_vol}_${dest_node}_${dest_vol}/${brick_path_dashes}/.processed/archive_*.tar | /usr/bin/env awk '{print $6}' | /usr/bin/env head -n -5 >> ${processed_changelogs}
+	/usr/bin/env tar -tvf /var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed/archive_*.tar | /usr/bin/env awk '{print $6}' | /usr/bin/env head -n -5 >> ${processed_changelogs}
 
 else
 	/usr/bin/env echo "No changelogs were processed locally!" >&2
@@ -69,7 +115,11 @@ CHANGELOG_FILE_COUNT=$(wc -l $changelog_file | awk '{print $1}')
 ENTRIES_TO_DELETE=$(wc -l $delete_list | awk '{print $1}')
 
 /usr/bin/env echo "CHANGELOG FILE COUNT: $CHANGELOG_FILE_COUNT"
-/usr/bin/env echo "ENTRIES THAT ARE NOW DELETED: $ENTRIES_TO_DELETE"
+if [ -z "$DRYRUN" ]; then
+	/usr/bin/env echo "ENTRIES THAT ARE NOW DELETED: $ENTRIES_TO_DELETE"
+else
+	/usr/bin/env echo "ENTRIES NOT DELETED: $ENTRIES_TO_DELETE"
+fi
 
 # If no logs have to be deleted , we skip
 if [ "$ENTRIES_TO_DELETE" -gt 0 ]; then
