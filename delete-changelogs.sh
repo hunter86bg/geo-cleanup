@@ -108,9 +108,9 @@ fi
 # Iterating over the 2 lists will allow us to match the full path of the CHANGELOG without issuing multiple finds
 # In the end if a changelog that was in the .proccessed/archive_<year><month>.tar, we can safely delete it
 # So we add it to a list of files that can be deleted
-while read changelog; do 
-	/usr/bin/env grep $changelog ${changelog_file}
-done < ${processed_changelogs}  >> ${delete_list}
+
+/usr/bin/env grep -F -f ${processed_changelogs} ${changelog_file} > ${delete_list}
+
 
 # This is just for info in case you are interested how many changelogs we got and how many were processed
 CHANGELOG_FILE_COUNT=$(wc -l $changelog_file | awk '{print $1}')
