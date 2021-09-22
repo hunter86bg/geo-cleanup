@@ -95,12 +95,14 @@ trap cleanup EXIT SIGINT SIGKILL SIGQUIT SIGTERM
 PROCESSED_LOCALLY=$(/usr/bin/env ionice -c 2 -n 7 /usr/bin/env find /var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed/ -type f -name "archive*.tar" |  wc -l)
 
 if [ "$PROCESSED_LOCALLY" -gt 0 ]; then
+        for tar_archive in $(/usr/bin/env find /var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed/ -type f -name "archive*.tar");
+                do
 
-	/usr/bin/env tar -tvf /var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed/archive_*.tar | /usr/bin/env awk '{print $6}' | /usr/bin/env head -n -5 >> ${processed_changelogs}
-
+                        /usr/bin/env tar -tvf $tar_archive | /usr/bin/env awk '{print $6}' | /usr/bin/env head -n -5 >> ${processed_changelogs}
+                done
 else
-	/usr/bin/env echo "No changelogs were processed locally!" >&2
-	exit 0
+       /usr/bin/env echo "No changelogs were processed locally!" >&2
+       exit 0
 fi
 
 # Iterating over the 2 lists will allow us to match the full path of the CHANGELOG without issuing multiple finds
