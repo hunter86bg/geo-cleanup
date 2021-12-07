@@ -43,7 +43,6 @@ while [[ $# -gt 0 ]]; do
 		-n|--dry-run)
 	                DRYRUN="/usr/bin/env echo"
 			shift
-			shift
 	                ;;
 		-s|--secondary_volume)
 			sec_vol="$2"
@@ -87,9 +86,24 @@ processed_changelogs=$(mktemp /var/tmp/gluster_cleanup/processed.XXXXXX)
 # Actual code that captures exit/Ctrl+C,etc
 trap cleanup EXIT SIGINT SIGKILL SIGQUIT SIGTERM
 
+
+#If we are a passive node -> we don't need any changelogs
+PASSIVE=$(/usr/bin/env gluster volume geo-replication status | /usr/bin/env awk -v HOSTNAME="$(hostname -s)" '$7=="Passive" &&  $1==HOSTNAME {print "True"}')
+
 # Get all changelogs locally and store them into $changelog_file
 # Changelogs are different per host
 /usr/bin/env ionice -c 2 -n 7 /usr/bin/env find ${brick_path}/.glusterfs/changelogs/$(date '+%Y')/  -type f -name "CHANGELOG.*" -print > ${changelog_file}
+
+if [ "$PASSIVE" == "True" ];
+	then
+		/usr/bin/env echo "We are a passive node.Deleting all changelogs."
+		/usr/bin/env cat ${changelog_file} | /usr/bin/env sort -n | /usr/bin/env head -n -5 > ${delete_list}
+		echo "CHANGELOGS to DELETE: $(/usr/bin/env wc -l $delete_list | /usr/bin/env awk '{print $1}')"
+		$DRYRUN /usr/bin/env ionice -c 2 -n 7 /usr/bin/env xargs --arg-file="$delete_list" rm
+		
+		# Exiting as we don't need the rest of the logic
+		exit 0
+fi
 
 #Obtain all processed changelogs
 PROCESSED_LOCALLY=$(/usr/bin/env ionice -c 2 -n 7 /usr/bin/env find /var/lib/misc/gluster/gsyncd/${master_vol}_${dest_node}_${sec_vol}/${brick_path_dashes}/.processed/ -type f -name "archive*.tar" |  wc -l)
@@ -108,9 +122,7 @@ fi
 # Iterating over the 2 lists will allow us to match the full path of the CHANGELOG without issuing multiple finds
 # In the end if a changelog that was in the .proccessed/archive_<year><month>.tar, we can safely delete it
 # So we add it to a list of files that can be deleted
-
 /usr/bin/env grep -F -f ${processed_changelogs} ${changelog_file} > ${delete_list}
-
 
 # This is just for info in case you are interested how many changelogs we got and how many were processed
 CHANGELOG_FILE_COUNT=$(wc -l $changelog_file | awk '{print $1}')
