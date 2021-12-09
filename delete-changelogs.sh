@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 master_vol=""
 sec_vol=""
@@ -20,6 +20,24 @@ if [ -z "$brick_path" ] || [ -z "$dest_node" ] || \
 		echo "One or more parameters are missing.Run $0 --help for details" >&2
 		exit 2
 fi
+}
+
+function delete_changelogs {
+ENTRIES_TO_DELETE=$(wc -l $delete_list | awk '{print $1}')
+if [ -z "$DRYRUN" ]; then
+        /usr/bin/env echo "ENTRIES THAT ARE NOW DELETED: $ENTRIES_TO_DELETE"
+else
+        /usr/bin/env echo "ENTRIES NOT DELETED: $ENTRIES_TO_DELETE"
+fi
+
+# If no logs have to be deleted , we skip
+if [ "$ENTRIES_TO_DELETE" -gt 0 ]; then
+	
+        $DRYRUN /usr/bin/env xargs --arg-file="$delete_list" rm
+else
+        /usr/bin/env echo "Nothing to do!"
+fi
+
 }
 
 # Parse all parameters for later usage
@@ -88,7 +106,7 @@ trap cleanup EXIT SIGINT SIGKILL SIGQUIT SIGTERM
 
 
 #If we are a passive node -> we don't need any changelogs
-PASSIVE=$(/usr/bin/env gluster volume geo-replication status | /usr/bin/env awk -v HOSTNAME="$(hostname -s)" '$7=="Passive" &&  $1==HOSTNAME {print "True"}')
+PASSIVE=$(/usr/bin/env gluster volume geo-replication status | /usr/bin/env awk -v HOSTNAME="$(hostname -s)" '/Passive/ &&  $1==HOSTNAME {print "True"}')
 
 # Get all changelogs locally and store them into $changelog_file
 # Changelogs are different per host
@@ -97,10 +115,8 @@ PASSIVE=$(/usr/bin/env gluster volume geo-replication status | /usr/bin/env awk 
 if [ "$PASSIVE" == "True" ];
 	then
 		/usr/bin/env echo "We are a passive node.Deleting all changelogs."
-		/usr/bin/env cat ${changelog_file} | /usr/bin/env sort -n | /usr/bin/env head -n -5 > ${delete_list}
-		echo "CHANGELOGS to DELETE: $(/usr/bin/env wc -l $delete_list | /usr/bin/env awk '{print $1}')"
-		$DRYRUN /usr/bin/env ionice -c 2 -n 7 /usr/bin/env xargs --arg-file="$delete_list" rm
-		
+		/usr/bin/env cat ${changelog_file} | /usr/bin/env sort -n | /usr/bin/env head -n -10 > ${delete_list}
+		delete_changelogs	
 		# Exiting as we don't need the rest of the logic
 		exit 0
 fi
@@ -129,15 +145,4 @@ CHANGELOG_FILE_COUNT=$(wc -l $changelog_file | awk '{print $1}')
 ENTRIES_TO_DELETE=$(wc -l $delete_list | awk '{print $1}')
 
 /usr/bin/env echo "CHANGELOG FILE COUNT: $CHANGELOG_FILE_COUNT"
-if [ -z "$DRYRUN" ]; then
-	/usr/bin/env echo "ENTRIES THAT ARE NOW DELETED: $ENTRIES_TO_DELETE"
-else
-	/usr/bin/env echo "ENTRIES NOT DELETED: $ENTRIES_TO_DELETE"
-fi
-
-# If no logs have to be deleted , we skip
-if [ "$ENTRIES_TO_DELETE" -gt 0 ]; then
-	$DRYRUN	/usr/bin/env xargs --arg-file="$delete_list" rm
-else
-	/usr/bin/env echo "Nothing to do!"
-fi
+delete_changelogs
